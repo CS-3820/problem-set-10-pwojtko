@@ -113,6 +113,7 @@ subst x m Recall = Recall
 subst x m (Throw n) = Throw (subst x m n)
 subst x m (Catch n y p) = Catch (subst x m n) y (substUnder x m y p)
 
+
 {-------------------------------------------------------------------------------
 
 Problems 3 - 10: Small-step semantics
@@ -204,74 +205,58 @@ bubble; this won't *just* be `Throw` and `Catch.
 
 -------------------------------------------------------------------------------}
 
-smallStep :: (Expr, Expr) -> Maybe (Expr, Expr)
-smallStep (e, acc) = case e of
-    Const _ -> Nothing
-    Var _ -> Nothing
-    Lam _ _ -> Nothing
-    Plus m n
-        | isException m -> Just (m, acc)
-        | isValue m ->
-            if isException n then
-                Just (n, acc)
-            else if isValue n then
-                case (m, n) of
-                    (Const i, Const j) -> Just (Const (i + j), acc)
-                    _ -> Nothing
-            else
-                case smallStep (n, acc) of
-                    Just (n', acc') -> Just (Plus m n', acc')
-                    Nothing -> Nothing
-        | otherwise ->
-            case smallStep (m, acc) of
-                Just (m', acc') -> Just (Plus m' n, acc')
-                Nothing -> Nothing
-    App m n
-        | isException m -> Just (m, acc)
-        | isValue m ->
-            if isException n then
-                Just (n, acc)
-            else if isValue n then
-                case m of
-                    Lam x body -> Just (subst x n body, acc)
-                    _ -> Nothing 
-            else
-                case smallStep (n, acc) of
-                    Just (n', acc') -> Just (App m n', acc')
-                    Nothing -> Nothing
-        | otherwise ->
-            case smallStep (m, acc) of
-                Just (m', acc') -> Just (App m' n, acc')
-                Nothing -> Nothing
-    Store m
-        | isException m -> Just (m, acc)
-        | isValue m -> Just (m, m) 
-        | otherwise ->
-            case smallStep (m, acc) of
-                Just (m', acc') -> Just (Store m', acc')
-                Nothing -> Nothing
-    Recall -> Just (acc, acc)
-    Throw m
-        | isException m -> Just (m, acc)
-        | isValue m -> Just (Throw m, acc)
-        | otherwise ->
-            case smallStep (m, acc) of
-                Just (m', acc') -> Just (Throw m', acc')
-                Nothing -> Nothing
-    Catch m y n
-        | isException m ->
-            case m of
-                Throw w -> Just (subst y w n, acc)
-                _ -> Nothing
-        | isValue m -> Just (m, acc)
-        | otherwise ->
-            case smallStep (m, acc) of
-                Just (m', acc') -> Just (Catch m' y n, acc')
-                Nothing -> Nothing
-
 isException :: Expr -> Bool
-isException (Throw v) | isValue v = True
-isException _ = False
+isException (Throw _) = True
+isException _         = False
+
+smallStep :: (Expr, Expr) -> Maybe (Expr, Expr)
+smallStep (Plus (Const i) (Const j), acc) = Just (Const (i + j), acc)
+smallStep (Plus (Throw m) n, acc) 
+    | isValue m = Just (Throw m, acc)
+smallStep (Plus (Const i) (Throw n), acc) 
+    | isValue n = Just (Throw n, acc)
+smallStep (Plus m n, acc) = 
+    case smallStep (m, acc) of
+        Just (m', acc') -> Just (Plus m' n, acc')
+        Nothing -> fmap (\(n', acc') -> (Plus m n', acc')) (smallStep (n, acc))
+
+smallStep (App (Lam x m) (Throw n), acc) 
+    | isValue n = Just (Throw n, acc)
+smallStep (App (Throw m) n, acc) 
+    | isValue m = Just (Throw m, acc)
+smallStep (App (Lam x m) n, acc) 
+    | isValue n = Just (subst x n m, acc)
+smallStep (App (Lam x m) n, acc) = 
+    fmap (\(n', acc') -> (App (Lam x m) n', acc')) (smallStep (n, acc))
+smallStep (App m n, acc) = 
+    fmap (\(m', acc') -> (App m' n, acc')) (smallStep (m, acc))
+
+smallStep (Store (Throw m), acc) 
+    | isValue m = Just (Throw m, acc)
+smallStep (Store m, acc) 
+    | isValue m = Just (m, m)
+smallStep (Store m, acc) = 
+    fmap (\(m', acc') -> (Store m', acc')) (smallStep (m, acc))
+smallStep (Recall, acc) = Just (acc, acc)
+
+smallStep (Throw (Throw m), acc) 
+    | isValue m = Just (Throw m, acc)
+smallStep (Throw m, acc) 
+    | isValue m = Nothing
+smallStep (Throw m, acc) = 
+    fmap (\(m', acc') -> (Throw m', acc')) (smallStep (m, acc))
+
+smallStep (Catch (Throw m) y n, acc) 
+    | isValue m = Just (subst y m n, acc)
+smallStep (Catch m y n, acc) 
+    | isValue m = Just (m, acc)
+smallStep (Catch m y n, acc) = 
+    fmap (\(m', acc') -> (Catch m' y n, acc')) (smallStep (m, acc))
+
+smallStep _ = Nothing
+
+    
+
 
 steps :: (Expr, Expr) -> [(Expr, Expr)]
 steps s = case smallStep s of
